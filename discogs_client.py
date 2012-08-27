@@ -130,18 +130,23 @@ class Collection(APIBase):
     def anv(self):
         return self._anv
 
-    @property
-    def all(self):
+    def all(self, sort_by=None, sort_order=None):
         if not self._all:
             self._folder = 0
+            self._sort_by = sort_by
+            self._sort_order = sort_order
             for release in self.data.get('releases', []):
                 self._all.append(Release(release.get('id')))
         return self._all
 
     @property
     def _uri(self):
-        return '%s/users/%s/collection/folders/%d/releases' % (api_uri, 
+        u = '%s/users/%s/collection/folders/%d/releases' % (api_uri, 
             urllib.quote_plus(unicode(self._id).encode('utf-8')), self._folder)
+        if self._sort_by:
+            u += '?sort=%s' % self._sort_by
+            u += '&sort_order=%s' % self._sort_order if self._sort_order else ''
+        return u 
 
     @property
     def data(self):
@@ -217,7 +222,7 @@ class Release(APIBase):
     @property
     def original_release_date(self):
         if not self._original_release_date:
-            self._original_release_date = self.master.released
+            self._original_release_date = self.master.released if self.master else self.data.get('released')
         return self._original_release_date
 
     @property
