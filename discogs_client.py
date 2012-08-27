@@ -69,7 +69,6 @@ class APIBase(object):
             if not self._check_user_agent():
                 raise UserAgentError("Invalid or no User-Agent set.")
             self._cached_response = requests.get(self._uri, params=self._params, headers=self._headers)
-
         return self._cached_response
 
     @property
@@ -115,6 +114,43 @@ def _class_from_string(api_string):
     }
 
     return class_map[api_string]
+
+class Collection(APIBase):
+    def __init__(self, name, anv=None):
+        self._id = name
+        self._all = []
+        self._anv = anv or None
+        APIBase.__init__(self)
+
+    @property
+    def username(self):
+        return self._id
+
+    @property
+    def anv(self):
+        return self._anv
+
+    @property
+    def all(self):
+        if not self._all:
+            self._folder = 0
+            for release in self.data.get('releases', []):
+                self._all.append(Release(release.get('id')))
+        return self._all
+
+    @property
+    def _uri(self):
+        return '%s/users/%s/collection/folders/%d/releases' % (api_uri, 
+            urllib.quote_plus(unicode(self._id).encode('utf-8')), self._folder)
+
+    @property
+    def data(self):
+        if self._response.content and self._response.status_code == 200:
+            return json.loads(self._response.content)
+        else:
+            status_code = self._response.status_code
+            raise HTTPError(status_code)
+
 
 class Artist(APIBase):
     def __init__(self, name, anv=None):
@@ -163,6 +199,7 @@ class Release(APIBase):
         self._labels = []
         self._credits = None
         self._tracklist = []
+        self._original_release_date = None
         APIBase.__init__(self)
 
     @property
@@ -176,6 +213,12 @@ class Release(APIBase):
         if not self._master and self.data.get('master_id'):
             self._master = MasterRelease(self.data.get('master_id'))
         return self._master
+
+    @property
+    def original_release_date(self):
+        if not self._original_release_date:
+            self._original_release_date = self.master.released
+        return self._original_release_date
 
     @property
     def labels(self):
@@ -229,6 +272,10 @@ class MasterRelease(APIBase):
         if not self._key_release:
             self._key_release = Release(self.data.get('main_release'))
         return self._key_release
+
+    @property
+    def released(self):
+        return self.key_release.data.get('released')
 
     @property
     def title(self):
