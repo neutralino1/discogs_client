@@ -130,10 +130,10 @@ class Collection(APIBase):
     def anv(self):
         return self._anv
 
-    def all(self, sort_by=None, sort_order=None):
+    def all(self, sort=None, sort_order=None):
         if not self._all:
             self._folder = 0
-            self._sort_by = sort_by
+            self._sort = sort
             self._sort_order = sort_order
             for release in self.data.get('releases', []):
                 self._all.append(Release(release.get('id')))
@@ -143,8 +143,8 @@ class Collection(APIBase):
     def _uri(self):
         u = '%s/users/%s/collection/folders/%d/releases' % (api_uri, 
             urllib.quote_plus(unicode(self._id).encode('utf-8')), self._folder)
-        if self._sort_by:
-            u += '?sort=%s' % self._sort_by
+        if self._sort:
+            u += '?sort=%s' % self._sort
             u += '&sort_order=%s' % self._sort_order if self._sort_order else ''
         return u 
 
