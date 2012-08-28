@@ -1,394 +1,247 @@
-__version_info__ = (1,1,1)
-__version__ = '1.1.1'
+__version_info__ = (0,0,1)
+__version__ = '0.0.1'
 
 import requests
 import json
 import urllib
 import httplib
-from collections import defaultdict
 
 api_uri = 'http://api.discogs.com'
 user_agent = None
 
+
 class DiscogsAPIError(Exception):
-    """Root Exception class for Discogs API errors."""
-    pass
+	"""Root Exception class for Discogs API errors."""
+	pass
 
 
 class UserAgentError(DiscogsAPIError):
-    """Exception class for User-Agent problems."""
-    def __init__(self, msg):
-        self.msg = msg
+	"""Exception class for User-Agent problems."""
+	def __init__(self, msg):
+		self.msg = msg
 
-    def __str__(self):
-        return repr(self.msg)
-
+	def __str__(self):
+		return repr(self.msg)
 
 class HTTPError(DiscogsAPIError):
-    """Exception class for HTTP(lib) errors."""
-    def __init__(self, code):
-        self.code = code
-        self.msg = httplib.responses[self.code]
+	"""Exception class for HTTP(lib) errors."""
+	def __init__(self, code):
+		self.code = code
+		self.msg = httplib.responses[self.code]
 
-    def __str__(self):
-        return "HTTP status %i: %s." % (self.code, self.msg)
-
-
-class PaginationError(DiscogsAPIError):
-    """Exception class for issues with paginated requests."""
-    def __init__(self, msg):
-        self.msg = msg
-
-    def __str__(self):
-        return repr(self.msg)
+	def __str__(self):
+		return "HTTP status %i: %s." % (self.code, self.msg)
 
 
 class APIBase(object):
-    def __init__(self):
-        self._cached_response = None
-        self._params = {}
-        self._headers = { 'accept-encoding': 'gzip, deflate' }
+	def __init__(self):
+		self._cached_response = None
+		self._params = {}
+		self._check_user_agent()            
 
-    def __str__(self):
-        return '<%s "%s">' % (self.__class__.__name__, self._id)
+	def __str__(self):
+		return '<%s, id: %s>' % (self.__class__.__name__, self._id)
 
-    def __repr__(self):
-        return self.__str__().encode('utf-8')
+	def __repr__(self):
+		return self.__str__().encode('utf-8')
 
-    def _check_user_agent(self):
-        if 'user_agent' in globals() and user_agent is not None:
-            self._headers['user-agent'] = user_agent
-        return 'user-agent' in self._headers and self._headers.get('user-agent')
+	def _check_user_agent(self):
+		self._headers = {'accept-encoding': 'gzip, deflate', 'user-agent': user_agent}
+		if self._headers['user-agent'] is None:
+			raise UserAgentError("Invalid or no User-Agent set.")
 
-    def _clear_cache(self):
-        self._cached_response = None
+	def _clear_cache(self):
+		self._cached_response = None
 
-    @property
-    def _response(self):
-        if not self._cached_response:
-            if not self._check_user_agent():
-                raise UserAgentError("Invalid or no User-Agent set.")
-            self._cached_response = requests.get(self._uri, params=self._params, headers=self._headers)
-        return self._cached_response
+	@property
+	def _response(self):
+		if not self._cached_response:
+			self._cached_response = requests.get(self._uri, params=self._params, headers=self._headers)
+		return self._cached_response
 
-    @property
-    def _uri_name(self):
-        return self.__class__.__name__.lower()
+	@property
+	def _uri(self):
+		return '%s/%s' % (api_uri, self._path)#, urllib.quote_plus(unicode(self._id).encode('utf-8')))
 
-    @property
-    def _uri(self):
-        return '%s/%s/%s' % (api_uri, self._uri_name, urllib.quote_plus(unicode(self._id).encode('utf-8')))
-
-    @property
-    def data(self):
-        if self._response.content and self._response.status_code == 200:
-            release_json = json.loads(self._response.content)
-            return release_json.get('resp').get(self._uri_name)
-        else:
-            status_code = self._response.status_code
-            raise HTTPError(status_code)
-
-def _parse_credits(extraartists):
-    """
-    Parse release and track level credits
-    """
-    _credits = defaultdict(list)
-    for artist in extraartists:
-        role = artist.get('role')
-        tracks = artist.get('tracks')
-
-        artist_dict = {'artists': Artist(artist['name'], anv=artist.get('anv'))}
-
-        if tracks:
-            artist_dict['tracks'] = tracks
-
-        _credits[role].append(artist_dict)
-    return _credits
-
-def _class_from_string(api_string):
-    class_map = {
-            'master': MasterRelease,
-            'release': Release,
-            'artist': Artist,
-            'label': Label
-    }
-
-    return class_map[api_string]
-
-class Collection(APIBase):
-    def __init__(self, name, anv=None):
-        self._id = name
-        self._all = []
-        self._anv = anv or None
-        APIBase.__init__(self)
-
-    @property
-    def username(self):
-        return self._id
-
-    @property
-    def anv(self):
-        return self._anv
-
-    def all(self, sort=None, sort_order=None):
-        if not self._all:
-            self._folder = 0
-            self._sort = sort
-            self._sort_order = sort_order
-            for release in self.data.get('releases', []):
-                self._all.append(Release(release.get('id')))
-        return self._all
-
-    @property
-    def _uri(self):
-        u = '%s/users/%s/collection/folders/%d/releases' % (api_uri, 
-            urllib.quote_plus(unicode(self._id).encode('utf-8')), self._folder)
-        if self._sort:
-            u += '?sort=%s' % self._sort
-            u += '&sort_order=%s' % self._sort_order if self._sort_order else ''
-        return u 
-
-    @property
-    def data(self):
-        if self._response.content and self._response.status_code == 200:
-            return json.loads(self._response.content)
-        else:
-            status_code = self._response.status_code
-            raise HTTPError(status_code)
-
-
-class Artist(APIBase):
-    def __init__(self, name, anv=None):
-        self._id = name
-        self._aliases = []
-        self._namevariations = []
-        self._releases = []
-        self._anv = anv or None
-        APIBase.__init__(self)
-
-    def __str__(self):
-        return '<%s "%s">' % (self.__class__.__name__, self._anv + '*' if self._anv else self._id)
-
-    @property
-    def name(self):
-        return self._id
-
-    @property
-    def anv(self):
-        return self._anv
-
-    @property
-    def aliases(self):
-        if not self._aliases:
-            for alias in self.data.get('aliases', []):
-                self._aliases.append(Artist(alias))
-        return self._aliases
-
-    @property
-    def releases(self):
-        # TODO: Implement fetch many release IDs
-        #return [Release(r.get('id') for r in self.data.get('releases')]
-        if not self._releases:
-            self._params.update({'releases': '1'})
-            self._clear_cache()
-
-            for r in self.data.get('releases', []):
-                self._releases.append(_class_from_string(r['type'])(r['id']))
-        return self._releases
-
-class Release(APIBase):
-    def __init__(self, id):
-        self._id = id
-        self._artists = []
-        self._master = None
-        self._labels = []
-        self._credits = None
-        self._tracklist = []
-        self._original_release_date = None
-        APIBase.__init__(self)
-
-    @property
-    def artists(self):
-        if not self._artists:
-            self._artists = [Artist(a['name']) for a in self.data.get('artists', [])]
-        return self._artists
-
-    @property
-    def master(self):
-        if not self._master and self.data.get('master_id'):
-            self._master = MasterRelease(self.data.get('master_id'))
-        return self._master
-
-    @property
-    def original_release_date(self):
-        if not self._original_release_date:
-            self._original_release_date = self.master.released if self.master else self.data.get('released')
-        return self._original_release_date
-
-    @property
-    def labels(self):
-        if not self._labels:
-            self._labels =  [Label(l['name']) for l in self.data.get('labels', [])]
-        return self._labels
-
-    @property
-    def credits(self):
-        if not self._credits:
-            self._credits = _parse_credits(self.data.get('extraartists', []))
-        return self._credits
-
-    @property
-    def tracklist(self):
-        if not self._tracklist:
-            for track in self.data.get('tracklist', []):
-                artists = []
-                track['extraartists'] = _parse_credits(track.get('extraartists', []))
-
-                for artist in track.get('artists', []):
-                    artists.append(Artist(artist['name'], anv=artist.get('anv')))
-
-                    if artist['join']:
-                        artists.append(artist['join'])
-                track['artists'] = artists
-                track['type'] = 'Track' if track['position'] else 'Index Track'
-
-                self._tracklist.append(track)
-        return self._tracklist
-
-    @property
-    def title(self):
-        return self.data.get('title')
-
-class MasterRelease(APIBase):
-    def __init__(self, id):
-        self._id = id
-        self._key_release = None
-        self._versions = []
-        self._artists = []
-        APIBase.__init__(self)
-
-    # Override class name introspection in BaseAPI since it would otherwise return "masterrelease"
-    @property
-    def _uri_name(self):
-        return 'master'
-
-    @property
-    def key_release(self):
-        if not self._key_release:
-            self._key_release = Release(self.data.get('main_release'))
-        return self._key_release
-
-    @property
-    def released(self):
-        return self.key_release.data.get('released')
-
-    @property
-    def title(self):
-        return self.key_release.data.get('title')
-
-    @property
-    def versions(self):
-        if not self._versions:
-            for version in self.data.get('versions', []):
-                self._versions.append(Release(version.get('id')))
-        return self._versions
-
-    @property
-    def artists(self):
-        if not self._artists:
-            for artist in self.data.get('artists', []):
-                self._artists.append(Artist(artist.get('name')))
-        return self._artists
-
-    @property
-    def tracklist(self):
-        return self.key_release.tracklist
-
-class Label(APIBase):
-    def __init__(self, name):
-        self._id = name
-        self._sublabels = []
-        self._parent_label = None
-        APIBase.__init__(self)
-
-    @property
-    def sublabels(self):
-        if not self._sublabels:
-            for sublabel in self.data.get('sublabels', []):
-                self._sublabels.append(Label(sublabel))
-        return self._sublabels
-
-    @property
-    def parent_label(self):
-        if not self._parent_label and self.data.get('parentLabel'):
-            self._parent_label = Label(self.data.get('parentLabel'))
-        return self._parent_label
-
-    @property
-    def releases(self):
-        self._params.update({'releases': '1'})
-        self._clear_cache()
-        return self.data.get('releases')
+	@property
+	def data(self):
+		if self._response.content and self._response.status_code == 200:
+			release_json = json.loads(self._response.content)
+			return release_json
+		else:
+			status_code = self._response.status_code
+			raise HTTPError(status_code)
 
 class Search(APIBase):
-    def __init__(self, query, page=1):
-        self._id = query
-        self._results = {}
-        self._exactresults = []
-        self._page = page
-        APIBase.__init__(self)
-        self._params['q'] = self._id
-        self._params['page'] = self._page
 
-    def _to_object(self, result):
-        id = result['title']
-        if result['type'] in ('master', 'release'):
-            id = result['uri'].split('/')[-1]
-        elif result['type'] == 'anv':
-            return Artist(id, anv=result.get('anv'))
-        return _class_from_string(result['type'])(id)
+	def _class_from_string(self, type):
+		return {'artist': Artist, 'release': Release}[type]
 
-    @property
-    def _uri(self):
-        return '%s/%s' % (api_uri, self._uri_name)
+	def __init__(self, query):
+		APIBase.__init__(self)
+		self._path = 'database/search'
+		self._params = {'q': query}
 
-    @property
-    def exactresults(self):
-        if not self.data:
-            return []
+	def results(self, type=None, page=None):
+		if type:
+			self._params['type'] = type
+		if page:
+			self._params['page'] = page
 
-        if not self._exactresults:
-            for result in self.data.get('exactresults', []):
-                self._exactresults.append(self._to_object(result))
-        return self._exactresults
+		results = []
 
-    def results(self, page=1):
-        page_key = 'page%s' % page
+		for result in self.data['results']:
+			results.append(self._class_from_string(result['type'])(result))
 
-        if page != self._page:
-            if page > self.pages:
-                raise PaginationError('Page number exceeds maximum number of pages returned.')
-            self._params['page'] = page
-            self._clear_cache()
+		return results
 
-        if not self.data:
-            return []
+class Artist(APIBase):
+	def __init__(self, data):
+		self._name = None
+		self._thumb = None
+		self._profile = None
+		self._image = None
+		self._releases, self._masters = [], []
+		if isinstance(data, int):
+			self._id = data
+		else:
+			self._id = data['id']
+			self._name = data['title'] if 'title' in data.keys() else None
+			self._thumb = data['thumb'] if 'thumb' in data.keys() else None
+		self._reset_path()
+		APIBase.__init__(self)
 
-        if page_key not in self._results:
-            self._results[page_key] = []
-            for result in self.data['searchresults']['results']:
-                self._results[page_key].append(self._to_object(result))
+	def _reset_path(self):
+		self._path = 'artists/%s' % self._id
 
-        return self._results[page_key]
+	@property
+	def name(self):
+		if not self._name:
+			self._name = self.data.get('name')
+		return self._name
 
-    @property
-    def numresults(self):
-        if not self.data:
-            return 0
-        return int(self.data['searchresults'].get('numResults', 0))
+	@property
+	def profile(self):
+		if not self._profile:
+			self._profile = self.data.get('profile')
+		return self._profile
 
-    @property
-    def pages(self):
-        if not self.data:
-            return 0
-        return (self.numresults / 20) + 1
+	@property
+	def image(self):
+		if not self._image:
+			self._image = self.data.get('images')[0]['uri150']
+		return self._image
+
+	@property
+	def thumb(self):
+		return self._thumb
+
+	@property
+	def releases(self):
+		if not self._releases:
+			self._path = '/artists/%s/releases' % self._id
+			self._clear_cache()
+			for r in self.data.get('releases'):
+				self._releases.append(Release(r))
+			self._reset_path()
+			self._clear_cache()
+		return self._releases
+
+	@property
+	def masters(self):
+		if not self._masters:
+			for r in self.releases:
+				if r.type == 'master':
+					self._masters.append(r)
+		return self._masters
+
+class Release(APIBase):
+	def __init__(self, data):
+		self._title = None
+		self._thumb = None
+		self._released = None
+		self._master = None
+		self._type = None
+		if isinstance(data, int):
+			self._id = data
+		else:
+			self._id = data['id']
+			self._type = data.get('type')
+			self._title = data.get('title')
+			self._thumb = data.get('thumb')
+			self._year = data.get('year')
+	
+		self._path = 'releases/%s' % self._id
+		APIBase.__init__(self)
+
+	@property
+	def title(self):
+		if not self._title:
+			self._title = self.data.get('title')
+		return self._title
+
+	@property
+	def year(self):
+		if not self._year:
+			self._year = self.data.get('year')
+		return self._year
+
+	@property
+	def type(self):
+		if not self._type:
+			self._type = self.data.get('type')
+		return self._type
+
+	@property
+	def released(self):
+		if not self._released:
+			self._released = self.data.get('released')
+		return self._released
+
+	@property
+	def master(self):
+		if not self._master:
+			master_id = self.data.get('master_id')
+			self._master =	Master(master_id) if master_id else None
+		return self._master
+
+class Master(APIBase):
+	def __init__(self, id):
+		self._id = id
+		self._released = None
+		self._title = None
+		self._path = 'masters/%s' % self._id
+		APIBase.__init__(self)
+
+	@property
+	def title(self):
+		if not self._title:
+			self._title = self.data.get('title')
+		return self._title
+
+	@property
+	def released(self):
+		if not self._released:
+			self._released = self.data.get('released')
+		return self._released	
+
+class User(APIBase):
+	def __init__(self, username):
+		self._username = username
+		self._reset_path()
+		self._collection = []
+		APIBase.__init__(self)
+
+	def _reset_path(self):
+		self._path = 'users/%s' % self._username
+
+	def collection(self, sort=None, order=None, page=None):
+		self._path = '/users/%s/collection/folders/0/releases' % self._username
+		self._clear_cache()
+		self._params = {'sort': sort, 'sort_order': order, 'page': page}
+		collection = []
+		for r in self.data.get('releases'):
+			collection.append(Release(r.get('basic_information')))
+		self._reset_path()
+		self._clear_cache()
+		return collection
