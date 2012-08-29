@@ -1,13 +1,11 @@
-# Discogs API Client
+# Discogs API v2.0 Python client
 
-This is the official Discogs API client for Python. You can use it to query the
+This is a port of the official Discogs API client for Python to the version 2.0 of the API. You can use it to query the
 Discogs music database for metadata on artists, releases, and more.
 
 ## Installation
 
-Install the client from PyPI using your favorite package manager.
-
-    $ pip install discogs-client
+I guess you should just download the file and include it in your project for now.
 
 ## Usage
 
@@ -23,15 +21,16 @@ You also need to set the User-Agent of your client to something unique before yo
 
 ### Getting data
 
-There are five classes you can use to fetch data from the API:
+There are six classes you can use to fetch data from the API:
 
  * `Artist`
  * `Release`
  * `MasterRelease`
  * `Label`
- * and `Search`.
+ * `Search`
+ * `User`
 
-Whereever possible, the Discogs client tries to convert API responses into these
+Wherever possible, the Discogs client tries to convert API responses into these
 objects. This enables you to drill down into the object graph as far as you
 like.
 
@@ -213,3 +212,15 @@ Any other results are paginated:
     >>> s.results(page=2)
     [...]
 
+## User
+
+To query a Discogs user, proceed as follow:
+
+    >>> u = discogs.User('username')
+
+Then you may access its collection using
+
+    >>> u.collection(sort='year', order='desc', page=1, per_page=25)
+    [<Release "...">, ...]
+
+If no parameters are provided, the default API settings are used.
