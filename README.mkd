@@ -46,11 +46,13 @@ raw information received from the API.
     
 Query for an artist using the artist's name:
 
-    >>> artist = discogs.Artist('Aphex Twin')
+    >>> artist = discogs.Artist(7551)
     >>> print artist
     <Artist "...">
     >>> 'name' in artist.data.keys()
     True
+    >>> print artist.name
+    "Blur"
 
 ### Special properties
 
